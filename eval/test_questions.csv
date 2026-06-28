@@ -1,0 +1,9 @@
+question,expected_source
+How do I request a refund under NimbusNote's policy?,product_policy_handbook.md
+What is NimbusNote's data retention period for user documents?,product_policy_handbook.md
+How can a user delete their NimbusNote account?,product_policy_handbook.md
+How does enterprise onboarding work for NimbusNote Knowledge Base?,customer_support_playbook.md
+What should a user do if they cannot reset their NimbusNote password?,customer_support_playbook.md
+How do I escalate a support issue for an enterprise customer?,customer_support_playbook.md
+What security controls and SSO options does NimbusNote support?,security_faq.md
+Where can admins find audit logs and document sharing permissions?,security_faq.md
