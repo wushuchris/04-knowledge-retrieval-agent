@@ -1,25 +1,58 @@
-name: Sync to Hugging Face Space
+name: Tests and Deploy
 
 on:
   push:
     branches:
       - main
+  pull_request:
 
 jobs:
-  sync-to-huggingface:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout GitHub repo
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Run retrieval evaluation
+        run: python -m eval.run_eval
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Push to Hugging Face Space
+      - name: Sync repository to Hugging Face Space
         env:
+          HF_DEPLOY_TOKEN: ${{ secrets.HF_DEPLOY_TOKEN }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          TOKEN="${HF_DEPLOY_TOKEN:-$HF_TOKEN}"
+          if [ -z "$TOKEN" ]; then
+            echo "Missing HF_DEPLOY_TOKEN or legacy HF_TOKEN repository secret."
+            exit 1
+          fi
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
-          git remote add space https://FlyingNunchucks:${HF_TOKEN}@huggingface.co/spaces/FlyingNunchucks/04-knowledge-retrieval-agent
+          git remote add space "https://FlyingNunchucks:${TOKEN}@huggingface.co/spaces/FlyingNunchucks/04-knowledge-retrieval-agent"
           git push --force space main
