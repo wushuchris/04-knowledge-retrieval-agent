@@ -1,5 +1,7 @@
-from typing import List, Dict
+from typing import Dict, List
 import re
+
+from src.retrieval import assess_evidence
 
 
 def clean_markdown(text: str) -> str:
@@ -45,11 +47,9 @@ def extract_relevant_sentences(text: str, question: str, max_sentences: int = 2)
         return []
 
     terms = question_terms(question)
-    scored = [
-        (score_sentence(sentence, terms), sentence)
-        for sentence in sentences
-    ]
+    scored = [(score_sentence(sentence, terms), sentence) for sentence in sentences]
     scored.sort(key=lambda pair: (pair[0], len(pair[1].split())), reverse=True)
+
     chosen = []
     for _, sentence in scored:
         if len(chosen) >= max_sentences:
@@ -57,60 +57,61 @@ def extract_relevant_sentences(text: str, question: str, max_sentences: int = 2)
         if sentence not in chosen:
             chosen.append(sentence)
 
-    if not chosen:
-        return sentences[:max_sentences]
-    return chosen
+    return chosen or sentences[:max_sentences]
 
 
 def estimate_confidence(results: List[Dict]) -> str:
-    if not results:
-        return "No evidence"
-
-    top_score = max(result.get("hybrid_score", 0) for result in results)
-    if top_score >= 0.60:
-        return "High"
-    if top_score >= 0.40:
-        return "Medium"
-    if top_score >= 0.25:
-        return "Low"
-    return "Very low"
+    evidence = assess_evidence(results)
+    if evidence["status"] == "sufficient":
+        return "High enough to answer from the approved corpus"
+    if evidence["status"] == "limited":
+        return "Limited — answer should be qualified"
+    return "Insufficient — abstain"
 
 
 def build_evidence_answer(question: str, results: List[Dict]) -> str:
-    if not results:
-        return "I could not find enough evidence in the document collection to answer that question."
+    evidence = assess_evidence(results)
+    if evidence["status"] == "insufficient":
+        return (
+            "**Evidence status: Insufficient**\n\n"
+            "I could not find a strong enough match in the approved document collection to answer this question reliably. "
+            "I will not fill the gap from model memory or outside knowledge."
+        )
 
     sorted_results = sorted(results, key=lambda item: item.get("hybrid_score", 0), reverse=True)
     top_results = sorted_results[:3]
-    confidence = estimate_confidence(top_results)
+
+    if evidence["status"] == "limited":
+        lead = (
+            "**Evidence status: Limited**\n\n"
+            "The corpus contains potentially relevant material, but the retrieval match is weak. Treat this as a qualified evidence extract rather than a confident answer."
+        )
+    else:
+        lead = "**Evidence status: Sufficient retrieval match**"
 
     answer_lines = [
-        f"Confidence: **{confidence}**",
+        lead,
         "",
-        "Based on the top retrieved evidence, the most relevant sentences are:",
+        "Based only on the retrieved evidence:",
         "",
     ]
 
+    cited_sentences = 0
     for item in top_results:
         chunk_num = item.get("chunk_number", "?")
         source = item.get("source", "unknown source")
         sentences = extract_relevant_sentences(item.get("text", ""), question, max_sentences=1)
-        if not sentences:
-            continue
-
         for sentence in sentences:
-            answer_lines.append(f"- {sentence} [{source} chunk {chunk_num}]")
+            answer_lines.append(f"- {sentence} **[{source} · chunk {chunk_num}]**")
+            cited_sentences += 1
 
-    if len(answer_lines) <= 4:
-        answer_lines.append("- No concise sentences could be extracted from the top results.")
+    if cited_sentences == 0:
+        answer_lines.append("- No concise answer sentence could be extracted from the retrieved chunks.")
 
-    answer_lines.extend(["", "Sources used:", ""])
+    answer_lines.extend(["", "**Evidence used**", ""])
     for item in top_results:
-        chunk_num = item.get("chunk_number", "?")
-        source = item.get("source", "unknown source")
-        hybrid_score = item.get("hybrid_score", 0)
         answer_lines.append(
-            f"- {source}, chunk {chunk_num}, hybrid score {hybrid_score:.3f}"
+            f"- {item.get('source', 'unknown source')} · chunk {item.get('chunk_number', '?')} · hybrid score {item.get('hybrid_score', 0):.3f}"
         )
 
     return "\n".join(answer_lines)
